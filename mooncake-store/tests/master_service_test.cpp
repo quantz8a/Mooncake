@@ -1803,11 +1803,12 @@ TEST_F(MasterServiceTest, MoveEndReleasesSourceRefcountWhenTargetGone) {
     // the private invariant: the source refcount must be released before the
     // move task is erased.
     auto service = std::make_unique<MasterService>();
-    PrepareSimpleSegment(*service, "refcnt_source", kDefaultSegmentBase);
+    const auto source =
+        PrepareSimpleSegment(*service, "refcnt_source", kDefaultSegmentBase);
     const auto target = PrepareSimpleSegment(
         *service, "refcnt_target", kDefaultSegmentBase + kDefaultSegmentSize);
 
-    const UUID client_id = generate_uuid();
+    const UUID client_id = source.client_id;
     ReplicateConfig config;
     config.replica_num = 1;
     config.preferred_segment = "refcnt_source";
@@ -3403,10 +3404,8 @@ TEST_F(MasterServiceTest, ClientOffboardingRetryPolicy) {
     EXPECT_EQ(ClientOffboardingRetryDelayForTest(2), std::chrono::seconds(2));
     EXPECT_EQ(ClientOffboardingRetryDelayForTest(3), std::chrono::seconds(4));
     EXPECT_EQ(ClientOffboardingRetryDelayForTest(4), std::chrono::seconds(8));
-    EXPECT_EQ(ClientOffboardingRetryDelayForTest(5),
-              std::chrono::seconds(16));
-    EXPECT_EQ(ClientOffboardingRetryDelayForTest(6),
-              std::chrono::seconds(30));
+    EXPECT_EQ(ClientOffboardingRetryDelayForTest(5), std::chrono::seconds(16));
+    EXPECT_EQ(ClientOffboardingRetryDelayForTest(6), std::chrono::seconds(30));
     EXPECT_EQ(ClientOffboardingRetryDelayForTest(100),
               std::chrono::seconds(30));
     EXPECT_FALSE(ClientOffboardingShouldAlertForTest(9));
@@ -3422,10 +3421,10 @@ TEST_F(MasterServiceTest, ReMountDoesNotRecoverSuspectedClient) {
 
     const auto liveness = FindClientLivenessForTest(service, client_id);
     ASSERT_TRUE(liveness);
-    ASSERT_EQ(liveness->Evaluate(ClientLivenessRecord::Clock::now(),
-                                 std::chrono::seconds::zero(),
-                                 std::chrono::hours(1)),
-              ClientLivenessTransition::BECAME_SUSPECTED);
+    ASSERT_EQ(
+        liveness->Evaluate(ClientLivenessRecord::Clock::now(),
+                           std::chrono::seconds::zero(), std::chrono::hours(1)),
+        ClientLivenessTransition::BECAME_SUSPECTED);
     MasterMetricManager::instance().client_liveness_became_suspected();
 
     ASSERT_TRUE(service.ReMountSegment({segment}, client_id).has_value());
@@ -3454,8 +3453,8 @@ TEST_F(MasterServiceTest,
         ClientLivenessTransition::BECAME_SUSPECTED);
     MasterMetricManager::instance().client_liveness_became_suspected();
 
-    auto upsert = service.UpsertStart(client_id, key, TenantId::Default(), 1024,
-                                      config);
+    auto upsert =
+        service.UpsertStart(client_id, key, TenantId::Default(), 1024, config);
     ASSERT_FALSE(upsert.has_value());
     EXPECT_EQ(upsert.error(), ErrorCode::UNAVAILABLE_IN_CURRENT_STATUS);
 

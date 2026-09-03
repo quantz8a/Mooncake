@@ -2266,7 +2266,9 @@ tl::expected<void, ErrorCode> MasterService::PersistStaleHandleCleanupForHA(
         });
     if (!result) {
         metadata.VisitReplicas(
-            [&ids](const Replica& replica) { return ids.contains(replica.id()); },
+            [&ids](const Replica& replica) {
+                return ids.contains(replica.id());
+            },
             [](Replica& replica) { replica.cancel_remove(); });
         LOG(WARNING) << why
                      << ": stale cleanup OpLog queue failed for key=" << key
@@ -3683,8 +3685,8 @@ tl::expected<void, ErrorCode> MasterService::RestoreFromStandbyState(
                         restored_allocators.at(buffer.transport_endpoint_);
                     auto restored_buffer =
                         std::make_unique<AllocatedBuffer>(alloc, buffer);
-                    replicas.emplace_back(desc.id, std::move(restored_buffer),
-                                          desc.status);
+                    replicas.push_back(Replica(
+                        desc.id, std::move(restored_buffer), desc.status));
                 } else if (desc.is_nof_replica()) {
                     const auto& buffer =
                         desc.get_nof_descriptor().buffer_descriptor;
@@ -3704,8 +3706,9 @@ tl::expected<void, ErrorCode> MasterService::RestoreFromStandbyState(
                     }
                     auto restored_buffer =
                         std::make_unique<AllocatedBuffer>(alloc, buffer);
-                    replicas.emplace_back(desc.id, std::move(restored_buffer),
-                                          desc.status, ReplicaType::NOF_SSD);
+                    replicas.push_back(
+                        Replica(desc.id, std::move(restored_buffer),
+                                desc.status, ReplicaType::NOF_SSD));
                 } else if (desc.is_disk_replica()) {
                     const auto& disk_desc = desc.get_disk_descriptor();
                     if (disk_desc.object_size != standby_meta.size) {
@@ -3732,11 +3735,12 @@ tl::expected<void, ErrorCode> MasterService::RestoreFromStandbyState(
                         desc.id, local_disk_desc.client_id,
                         local_disk_desc.object_size,
                         local_disk_desc.transport_endpoint, desc.status,
-                        record_for_known_owner(local_disk_desc.client_id));
+                        record_for_known_owner(local_disk_desc.client_id)));
                 } else {
-                    LOG(ERROR) << "RestoreFromStandbySnapshot: unsupported replica "
-                               << "descriptor, tenant=" << tenant_id.value()
-                               << ", key=" << user_key;
+                    LOG(ERROR)
+                        << "RestoreFromStandbySnapshot: unsupported replica "
+                        << "descriptor, tenant=" << tenant_id.value()
+                        << ", key=" << user_key;
                     return tl::make_unexpected(ErrorCode::INVALID_PARAMS);
                 }
             }
@@ -4658,10 +4662,9 @@ auto MasterService::AllocateAndInsertMetadata(
         {
             ScopedAllocatorAccess allocator_access =
                 segment_manager_.getAllocatorAccess();
-            has_enough_memory_segments =
-                allocator_access.getAllocatorManager()
-                    .getServingNames()
-                    .size() >= config.replica_num;
+            has_enough_memory_segments = allocator_access.getAllocatorManager()
+                                             .getServingNames()
+                                             .size() >= config.replica_num;
             if (!writer_host_id.empty()) {
                 auto host_ordered_segments =
                     allocator_access.GetHostOrderedSegments(writer_host_id,
@@ -5228,9 +5231,9 @@ auto MasterService::AddReplica(const UUID& client_id, const std::string& key,
                                const TenantId& tenant_id, Replica& replica)
     -> tl::expected<bool, ErrorCode> {
     const auto client_liveness = FindClientRecord(client_id);
-    auto retaining_guard =
-        client_liveness ? client_liveness->TryAcquireRetainingGuard()
-                        : std::nullopt;
+    auto retaining_guard = client_liveness
+                               ? client_liveness->TryAcquireRetainingGuard()
+                               : std::nullopt;
     if (!retaining_guard) {
         return tl::make_unexpected(ErrorCode::UNAVAILABLE_IN_CURRENT_STATUS);
     }
@@ -5238,9 +5241,10 @@ auto MasterService::AddReplica(const UUID& client_id, const std::string& key,
     return AddReplicaForRetainedClient(client_id, key, tenant_id, replica);
 }
 
-auto MasterService::AddReplicaForRetainedClient(
-    const UUID& client_id, const std::string& key, const TenantId& tenant_id,
-    Replica& replica)
+auto MasterService::AddReplicaForRetainedClient(const UUID& client_id,
+                                                const std::string& key,
+                                                const TenantId& tenant_id,
+                                                Replica& replica)
     -> tl::expected<bool, ErrorCode> {
     assert(tenant_id.IsValid());
     TenantId normalized_tenant;
@@ -10566,11 +10570,11 @@ MasterService::RebuildClientLivenessAfterSnapshotRestore() {
                         [](const Replica&) { return true; },
                         [&](Replica& replica) {
                             if (replica.is_memory_replica()) {
-                                auto& buffer = *std::get<MemoryReplicaData>(
-                                                    replica.data_)
-                                                    .buffer;
-                                if (!segment_access
-                                         .RebindBufferToOwningSegment(buffer)) {
+                                auto& buffer =
+                                    *std::get<MemoryReplicaData>(replica.data_)
+                                         .buffer;
+                                if (!segment_access.RebindBufferToOwningSegment(
+                                        buffer)) {
                                     missing_memory_registration = true;
                                 }
                             } else if (replica.is_local_disk_replica()) {
@@ -12119,7 +12123,8 @@ void MasterService::ClientMonitorFunc() {
             const auto transition = record->EvaluateAndRetire(
                 now, std::chrono::seconds(client_active_ttl_sec_),
                 std::chrono::seconds(client_suspicion_ttl_sec_),
-                [&] { client_offboarding_worker_.ReserveJob(); }, [&] {
+                [&] { client_offboarding_worker_.ReserveJob(); },
+                [&] {
                     {
                         std::unique_lock<std::shared_mutex> client_lock(
                             client_mutex_);
@@ -12203,8 +12208,7 @@ void MasterService::ClientMonitorFunc() {
 
                     MasterMetricManager::instance()
                         .client_liveness_became_offline();
-                    client_offboarding_worker_.ScheduleReserved(
-                        std::move(job));
+                    client_offboarding_worker_.ScheduleReserved(std::move(job));
                 });
 
             if (transition == ClientLivenessTransition::BECAME_SUSPECTED) {

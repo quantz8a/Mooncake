@@ -615,10 +615,9 @@ target_include_directories(tent_runtime_queue_dispatch_test
 add_test(NAME tent_runtime_queue_dispatch_test
          COMMAND tent_runtime_queue_dispatch_test)
 
-add_executable(tent_local_memory_lifecycle_test
-               local_memory_lifecycle_test.cpp)
-target_link_libraries(tent_local_memory_lifecycle_test
-                      PRIVATE gtest gtest_main tent_link_group)
+add_executable(tent_local_memory_lifecycle_test local_memory_lifecycle_test.cpp)
+target_link_libraries(tent_local_memory_lifecycle_test PRIVATE gtest gtest_main
+                                                               tent_link_group)
 if(TARGET asio_shared)
   target_link_libraries(tent_local_memory_lifecycle_test PRIVATE asio_shared)
 endif()
@@ -699,3 +698,19 @@ endif()
 target_include_directories(tent_rpc_reconnect_test
                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 add_test(NAME tent_rpc_reconnect_test COMMAND tent_rpc_reconnect_test)
+
+if(USE_ASCEND OR USE_ASCEND_DIRECT)
+  add_executable(tent_ascend_direct_transport_test
+                 ascend_direct_transport_test.cpp)
+  target_link_libraries(tent_ascend_direct_transport_test
+                        PRIVATE gtest gtest_main tent_link_group)
+  if(TARGET asio_shared)
+    target_link_libraries(tent_ascend_direct_transport_test PRIVATE asio_shared)
+  endif()
+  target_include_directories(tent_ascend_direct_transport_test
+                             PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+  set_target_properties(tent_ascend_direct_transport_test
+                        PROPERTIES LINK_FLAGS "-Wl,--allow-shlib-undefined")
+  add_test(NAME tent_ascend_direct_transport_test
+           COMMAND tent_ascend_direct_transport_test)
+endif()

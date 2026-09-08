@@ -1,6 +1,6 @@
 ---
 name: mooncake-troubleshoot
-description: Automatically diagnose Mooncake deployment and runtime issues. Checks services (mooncake_master, metadata server), RDMA devices, environment variables, connectivity, memory limits, object integrity, and analyzes logs for common error patterns. Use when Mooncake deployment fails, services won't start, connections fail, data is corrupted or garbled, or you encounter runtime errors like "Error from etcd client", "No matched device found", "Failed to register memory", "NO_AVAILABLE_HANDLE", "CHECKSUM_MISMATCH", or any RDMA/networking issues. Also use when user asks to troubleshoot, debug, diagnose, or fix Mooncake problems.
+description: Automatically diagnose Mooncake deployment and runtime issues. Checks services (mooncake_master, metadata server), RDMA devices, environment variables, connectivity, memory limits, object integrity, and analyzes logs for common error patterns. Use when Mooncake deployment fails, services won't start, connections fail, data is corrupted or garbled, or you encounter runtime errors like "Error from etcd client", "No matched device found", "Failed to register memory", "NO_AVAILABLE_HANDLE", "CHECKSUM_MISMATCH", "Wait channel connected timed out", TRANSFER_FAIL, or any RDMA/HIXL/Ascend networking issues including alltoall_test port conflicts. Also use when user asks to troubleshoot, debug, diagnose, or fix Mooncake problems.
 ---
 
 # Mooncake Deployment Troubleshooting
@@ -90,6 +90,8 @@ echo "MOONCAKE_STORE_CHECKSUM: $MOONCAKE_STORE_CHECKSUM"
 - `MC_MTU` - RDMA MTU size
 - `MC_ENABLE_DEST_DEVICE_AFFINITY=1` - Reduce QP creation (fix "Failed to create QP")
 - `MOONCAKE_STORE_CHECKSUM=1` - Enable diagnostic object-level CRC-64 checks; set before starting every writer and reader client process
+- `ASCEND_BASE_PORT` - HIXL/Ascend Direct control-port base (default `20000`). Same band HCCL `alltoall_test` uses.
+- `ASCEND_RT_VISIBLE_DEVICES` - Limits which NPUs dummy-real/`mooncake_client` walk. A 2-rank test should set `0,1`, not all 16 cards.
 
 ### 4. RDMA Device Check
 
@@ -226,6 +228,12 @@ Search logs for common error patterns and their meanings:
 **Port/Service Errors:**
 - `bind address already in use` → Port conflict
   - **Fix:** Use different port: `--rpc_port=50052`
+
+**Ascend HIXL / HCCL port conflicts:**
+- `Wait channel connected timed out` / `TRANSFER_FAIL` while `alltoall_test` (or other HCCL jobs) is running → HIXL control ports default to `ASCEND_BASE_PORT + device_id * 100` starting at **20000**, the same band HCCL uses. RoCE `comm_resource_config.listen_port` is a second socket, not the engine `ip:port` name.
+  - **Fix (test/env, not library hacks):** set `ASCEND_BASE_PORT` to a free band (e.g. `44000`). Do not run TENT e2e while alltoall occupies every NPU; unique ports cannot fix a saturated RoCE NIC.
+- Dummy-real `mooncake_client` with `agent_mode` creates one HIXL engine per visible device and **splits host DRAM across those engines**. That split is intended. Do not pin all host buffers to engine 0 in the transport.
+  - **Fix (test/env):** `export ASCEND_RT_VISIBLE_DEVICES=0,1` so a 2-rank standalone job gets 2 engines, not 16. Python ranks should use devices 0 and 1.
 
 ### 8. Configuration Validation
 

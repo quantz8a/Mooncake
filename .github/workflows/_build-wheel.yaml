@@ -181,7 +181,16 @@ jobs:
           [ -d /usr/local/cuda ] && export CUDA_HOME=/usr/local/cuda
           SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo -E"
           cd build
-          cmake --build . -j"$(nproc)"
+          # Bound outer parallelism by RAM, not just cores: CUDA-13-heavy TUs
+          # can need 3-4 GB each, and saturating a 4-core/16 GB hosted runner
+          # starves the runner agent until GitHub declares the VM dead
+          # ("hosted runner lost communication", surfaces as exit code 137).
+          jobs="$(nproc)"
+          mem_jobs=$(( $(awk '/MemTotal/ {print int($2/1024/1024)}' /proc/meminfo) / 5 ))
+          if [ "$mem_jobs" -ge 2 ] && [ "$mem_jobs" -lt "$jobs" ]; then jobs="$mem_jobs"; fi
+          if [ "$jobs" -lt 2 ]; then jobs=2; fi
+          echo "Building with -j$jobs (nproc=$(nproc))"
+          cmake --build . -j"$jobs"
           $SUDO cmake --install .
 
       - name: Build nvlink_allocator.so
